@@ -183,15 +183,19 @@ class CamEnforcer(commands.Bot):
                 if warn > 0 and grace > warn:
                     await asyncio.sleep(grace - warn)
                     # re-check before warning
-                    if not self._should_enforce(member):
+                    current_member = member.guild.get_member(member_id)
+                    if current_member is None or not self._should_enforce(current_member):
                         return
-                    await self._dm_warn(member, warn)
+                    await self._dm_warn(current_member, warn)
                     await asyncio.sleep(warn)
                 else:
                     await asyncio.sleep(grace)
 
                 # final check
-                await self._kick_for_no_cam(member)
+                current_member = member.guild.get_member(member_id)
+                if current_member is None:
+                    return
+                await self._kick_for_no_cam(current_member)
             except asyncio.CancelledError:
                 pass
             finally:

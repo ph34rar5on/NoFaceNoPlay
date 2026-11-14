@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import main
 
@@ -27,6 +27,7 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
             send=AsyncMock(),
         )
         self.watched.members = [self.member]
+        self.guild.get_member = Mock(return_value=self.member)
         self.bot._log = AsyncMock()
         self.interaction = SimpleNamespace(
             guild_id=1,
@@ -168,6 +169,58 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
                     self.member.bot = True
                 await self.finish(task)
                 self.member.move_to.assert_not_awaited()
+
+    async def test_countdown_refreshes_cached_member(self):
+        for phase in ("warning", "final_with_warning", "final_without_warning"):
+            for state in ("exempt", "missing", "eligible"):
+                with self.subTest(phase=phase, state=state):
+                    self.settings[1].update(
+                        grace_seconds=30,
+                        warning_seconds=0 if phase == "final_without_warning" else 10,
+                        exempt_role_ids=[77],
+                    )
+                    refreshed = SimpleNamespace(
+                        **{
+                            **vars(self.member),
+                            "roles": [SimpleNamespace(id=77)] if state == "exempt" else [],
+                            "send": AsyncMock(),
+                            "move_to": AsyncMock(),
+                        }
+                    )
+                    self.member.send.reset_mock()
+                    self.member.move_to.reset_mock()
+                    self.guild.get_member.reset_mock()
+                    self.guild.get_member.return_value = self.member
+                    refresh_after = {
+                        "warning": 20, "final_with_warning": 10, "final_without_warning": 30,
+                    }[phase]
+
+                    async def sleep(seconds):
+                        if seconds == refresh_after:
+                            self.guild.get_member.return_value = (
+                                None if state == "missing" else refreshed
+                            )
+
+                    task = await self.schedule()
+                    with patch.object(main.asyncio, "sleep", side_effect=sleep):
+                        await asyncio.wait_for(task, timeout=1)
+
+                    self.guild.get_member.assert_called_with(self.member.id)
+                    self.member.move_to.assert_not_awaited()
+                    if state == "eligible":
+                        refreshed.move_to.assert_awaited_once_with(
+                            None, reason="Camera required — grace period expired"
+                        )
+                    else:
+                        refreshed.move_to.assert_not_awaited()
+                    if phase == "warning" and state == "eligible":
+                        refreshed.send.assert_awaited_once()
+                    else:
+                        refreshed.send.assert_not_awaited()
+                    self.assertEqual(
+                        self.member.send.await_count, int(phase == "final_with_warning")
+                    )
+                    self.assertNotIn(42, self.bot._pending_kicks[1])
 
     async def test_unwatch_prevents_pending_disconnect(self):
         task = await self.schedule()
