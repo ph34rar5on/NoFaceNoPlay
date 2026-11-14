@@ -31,6 +31,7 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         self.bot._log = AsyncMock()
         self.interaction = SimpleNamespace(
             guild_id=1,
+            guild=None,
             response=SimpleNamespace(send_message=AsyncMock()),
         )
         self.tasks = []
