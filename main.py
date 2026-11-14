@@ -202,6 +202,15 @@ class CamEnforcer(commands.Bot):
         task = asyncio.create_task(_countdown())
         self._pending_kicks.setdefault(guild_id, {})[member_id] = task
 
+    async def _scan_guild_voice_members(self, guild: discord.Guild) -> None:
+        """Reconcile countdowns with members currently connected to voice."""
+        for channel in guild.voice_channels:
+            for member in channel.members:
+                if not self._should_enforce(member):
+                    self._cancel_pending(guild.id, member.id)
+                elif member.id not in self._pending_kicks.get(guild.id, {}):
+                    await self._schedule_kick(member)
+
     # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
@@ -211,13 +220,7 @@ class CamEnforcer(commands.Bot):
         print(f"Watching {len(config.WATCHED_CHANNEL_IDS)} channel(s) from env.")
         print("------")
         for guild in self.guilds:
-            pending = self._pending_kicks.get(guild.id, {})
-            for channel in guild.voice_channels:
-                for member in channel.members:
-                    if not self._should_enforce(member):
-                        self._cancel_pending(guild.id, member.id)
-                    elif member.id not in pending:
-                        await self._schedule_kick(member)
+            await self._scan_guild_voice_members(guild)
 
     async def on_voice_state_update(
         self,
@@ -270,6 +273,8 @@ async def camset_watch(interaction: discord.Interaction, channel: discord.VoiceC
     watched = set(get_guild_setting(interaction.guild_id, "watched_channel_ids", config.WATCHED_CHANNEL_IDS))
     watched.add(channel.id)
     set_guild_setting(interaction.guild_id, "watched_channel_ids", list(watched))
+    if interaction.guild is not None:
+        await bot._scan_guild_voice_members(interaction.guild)
     await interaction.response.send_message(f"✅ Now watching <#{channel.id}>.", ephemeral=True)
 
 
@@ -300,6 +305,8 @@ async def camset_unexempt(interaction: discord.Interaction, role: discord.Role):
     exempt = set(get_guild_setting(interaction.guild_id, "exempt_role_ids", config.EXEMPT_ROLE_IDS))
     exempt.discard(role.id)
     set_guild_setting(interaction.guild_id, "exempt_role_ids", list(exempt))
+    if interaction.guild is not None:
+        await bot._scan_guild_voice_members(interaction.guild)
     await interaction.response.send_message(f"✅ Removed exemption for role {role.mention}.", ephemeral=True)
 
 
