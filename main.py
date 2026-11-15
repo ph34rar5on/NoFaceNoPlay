@@ -289,6 +289,8 @@ async def camset_unwatch(interaction: discord.Interaction, channel: discord.Voic
     watched = set(get_guild_setting(interaction.guild_id, "watched_channel_ids", config.WATCHED_CHANNEL_IDS))
     watched.discard(channel.id)
     set_guild_setting(interaction.guild_id, "watched_channel_ids", list(watched))
+    if interaction.guild is not None:
+        await bot._scan_guild_voice_members(interaction.guild)
     await interaction.response.send_message(f"✅ Stopped watching <#{channel.id}>.", ephemeral=True)
 
 
@@ -299,6 +301,8 @@ async def camset_exempt(interaction: discord.Interaction, role: discord.Role):
     exempt = set(get_guild_setting(interaction.guild_id, "exempt_role_ids", config.EXEMPT_ROLE_IDS))
     exempt.add(role.id)
     set_guild_setting(interaction.guild_id, "exempt_role_ids", list(exempt))
+    if interaction.guild is not None:
+        await bot._scan_guild_voice_members(interaction.guild)
     await interaction.response.send_message(f"✅ Exempted role {role.mention}.", ephemeral=True)
 
 

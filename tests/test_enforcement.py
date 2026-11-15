@@ -239,6 +239,38 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         await self.finish(task)
         self.member.move_to.assert_not_awaited()
 
+    async def test_settings_reconciliation_starts_fresh_countdown(self):
+        self.interaction.guild = self.guild
+        role = SimpleNamespace(id=77, mention="<@&77>")
+        self.member.roles = [role]
+        for disable, enable, argument in (
+            (main.camset_unwatch, main.camset_watch, self.watched),
+            (main.camset_exempt, main.camset_unexempt, role),
+        ):
+            with self.subTest(command=disable.name), patch.object(main, "bot", self.bot):
+                self.settings[1].update(watched_channel_ids=[10], exempt_role_ids=[])
+                self.member.move_to.reset_mock()
+                old = await self.schedule()
+                await asyncio.sleep(0)
+
+                await disable.callback(self.interaction, argument)
+                self.assertNotIn(42, self.bot._pending_kicks[1])
+                self.assertTrue(old.cancelling())
+                self.assertFalse(self.bot._should_enforce(self.member))
+                await old
+
+                await enable.callback(self.interaction, argument)
+                replacement = self.bot._pending_kicks[1][42]
+                self.tasks.append(replacement)
+                self.assertIsNot(old, replacement)
+                self.assertIs(self.bot._pending_kicks[1][42], replacement)
+                self.member.move_to.assert_not_awaited()
+
+                with patch.object(main.asyncio, "sleep", new_callable=AsyncMock) as sleep:
+                    await asyncio.wait_for(replacement, timeout=1)
+                sleep.assert_awaited_once_with(self.settings[1]["grace_seconds"])
+                self.member.move_to.assert_awaited_once()
+
     async def test_existing_member_enforced_on_ready(self):
         await self.ready()
         self.assertIn(42, self.bot._pending_kicks[1])
